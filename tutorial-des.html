@@ -1,0 +1,805 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tutorial | AMBER | LSC-IVR</title>
+<link rel="stylesheet" href="style.css" />
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-108786458-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-108786458-1');
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.2/MathJax.js?config=TeX-AMS_CHTML-full" 
+ type="text/javascript"
+integrity="sha256-fCth3p2B4cZMzlr7OFizmo5RkdJAHJ4vOHpE7FaNcR8="
+crossorigin="anonymous"></script>
+</head>
+<body>
+<div class="container">
+<h1>Tutorial – GPU simulation with pmemd.cuda engine in Amber (using zinc chloride-methanol mixture as an example)</h1>
+
+<p>TABLE OF CONTENTS</p>
+
+<p><div class="toc">
+<ul>
+<li><a href="#1-introduction">1. Introduction</a></li>
+<li><a href="#2-preparing-topology-and-coordinate-files">2. Preparing topology and coordinate files</a><ul>
+<li><a href="#21-creating-pdb-files">2.1 Creating pdb files</a></li>
+<li><a href="#22-creating-mol2-files-for-all-residues">2.2 Creating mol2 files for all residues</a></li>
+<li><a href="#23-creating-parameter-modification-file-for-zinc-ion">2.3 Imposing periodic boundary conditions and creating the topology and coordinate files</a></li>
+<li><a href="#24-creating-the-topology-and-coordinate-files">2.4 Creating the topology and coordinate files</a></li>
+</ul>
+</li>
+<li><a href="#3-classical-dynamics">3. Classical Dynamics</a><ul>
+<li><a href="#31-equilibrating-the-system-using-classical-dynamics-npt">3.1 Equilibrating the system using classical dynamics (NPT)</a></li>
+<li><a href="#32-equilibrating-the-system-using-classical-dynamics-nvt">3.2 Equilibrating the system using classical dynamics (NVT)</a></li>
+<li><a href="#33-surface-tension">3.3 Surface tension and vapour pressure calculation using NVT simulations</a></li>
+<li><a href="#34-hbond-analysis">3.4 Analysis the hydrogen bond network in the mixture</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</div>
+</p>
+
+
+
+<h1 id="1-introduction">1. Introduction</h1>
+
+<p>This tutorial introduces how to use the GPU MD engine in Amber2022 to simulate large systems with traditional MD methods and middle-thermostat scheme method</p>
+
+<p>It is designed for those who are going to run molecular dynamics simulations with quantum dynamic methods, PIMD and LSC-IVR. The prerequisites are listed as below:</p>
+
+<ul>
+<li><p><a href="http://ambermd.org/" title="Amber">AMBER22 software package</a> - <em>pmemd</em> and its GPU version, <em>pmemd.cuda</em>, are used to run dynamics simulations. In addition, <em>LEaP</em> (<em>tleap</em> and its graphical user interface, <em>xleap</em>) is utilized to generate the topology file of the water molecule and water box.</p></li>
+<li><p><a href="http://www.ime.unicamp.br/~martinez/packmol/" title="Packmol">Packmol</a> - Create the pdb file of water box, by packing single molecules in a defined region.</p></li>
+<li><p><a href="http://www.ks.uiuc.edu/Research/vmd/" title="VMD">VMD</a> - Visualize the structures and motions of molecules. It is optional here, but can be helpful to build the image of the model.</p></li>
+</ul>
+
+<blockquote>
+  <p>Note: </p>
+  
+  <ul>
+  <li>Amber2022 needed to be installed with CUDA.</li>
+  <li>One is supposed to know or can find the meanings of basic shell commands in Linux, such as <code>ls</code>, <code>pwd</code>, <code>cd</code>, <code>mkdir</code>, <code>cp</code>, <code>mv</code>, and so on.</li>
+  <li>The shell scripts used in this tutorial are run in Linux platform, and should be set as executable first, then run in the terminal. For example, suppose one has a script file named ‘example.sh’, one may set it as executable by <code>chmod +x example.sh</code>, then run in the terminal using the command <code>./example.sh</code>.</li>
+  </ul>
+</blockquote>
+
+<p>The tutorial is organized as follows: first we prepare topology and coordinate files for zinc chloride methanol mixture and minimize the energy. Then classical dynamics with pmemd.cuda can be used to equilibrate and sample the system. Several procudures to postprocess the data are introduced next. </p>
+
+
+
+<h1 id="2-preparing-topology-and-coordinate-files">2. Preparing topology and coordinate files</h1>
+
+<p>In this section, topology and coordinate files of zinc chloride methnaol mixture will be prepared with several tools.</p>
+
+
+
+<h2 id="21-creating-pdb-files">2.1 Creating pdb files</h2>
+
+<p>First, we can simply write pdb files for zinc ion and chloridion. If you are not familiar with the format of pdb files, please read <a href="https://www.cgl.ucsf.edu/chimera/docs/UsersGuide/tutorials/pdbintro.html.">pdbintro</a></p>
+
+<center><a href="files/Zn.pdb">Zn.pdb</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">ATOM      1 Zn    zn     1       0.000   0.000   0.000                        Zn
+TER
+END
+</code></pre>
+
+<center><a href="files/Cl.pdb">Cl.pdb</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">ATOM      1 Cl    Cl     1       0.000   0.000   0.000                        Cl
+TER
+END
+</code></pre>
+
+<p>For methanol, We can use Gaussview to draw the methanol molecule and save as pdb file.</p>
+<center><img src="figs/gauview1.png" alt="gauview1"></center>
+<center><img src="figs/gauview2.png" alt="gauview2"></center>
+
+<p>The methanol pdb file look like this:</p>
+
+<center><a href="files/me.pdb">me.pdb</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">REMARK   1 File created by GaussView 6.0.16
+HETATM    1  C           0       0.655  -0.020   0.000                       C
+HETATM    2  H           0       1.012  -0.544  -0.883                       H
+HETATM    3  H           0       1.077   0.976  -0.001                       H
+HETATM    4  H           0       1.012  -0.543   0.884                       H
+HETATM    5  O           0      -0.737   0.121   0.000                       O
+HETATM    6  H           0      -1.140  -0.736   0.000                       H
+END
+CONECT    1    2    3    4    5
+CONECT    2    1
+CONECT    3    1
+CONECT    4    1
+CONECT    5    6    1
+CONECT    6    5
+</code></pre>
+
+<p><strong>me.pdb</strong> should be changed manually to:</p>
+
+<center><a href="files/me1.pdb">me1.pdb</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">REMARK This file was edited manually
+ATOM      1  C1   me     1       0.655  -0.020   0.000                        C
+ATOM      2  H2   me     1       1.012  -0.544  -0.883                        H
+ATOM      3  H3   me     1       1.077   0.976  -0.001                        H
+ATOM      4  H4   me     1       1.012  -0.543   0.884                        H
+ATOM      5  O5   me     1      -0.737   0.121   0.000                        O
+ATOM      6  H6   me     1      -1.140  -0.736   0.000                        H
+TER
+END
+</code></pre>
+
+<p>The Packmol program (included in Amber now) is used to produce a file named ‘ZnCl-meoh-1-3.pdb’ that describes Methanol-ZnCl system with the ratio of 1:3 by inputting the file ‘me1.pdb’, ‘Zn.pdb’ and ‘Cl.pdb’. The input script is required for this step, here is an example:</p>
+
+<center><a href="files/input.inp">input.inp</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">tolerance 2.0
+output ZnCl-meoh-1-3.pdb
+filetype pdb
+structure me1.pdb
+number 1740
+inside cube 0. 0. 0. 55 .
+end structure
+structure Cl.pdb
+number 1160
+inside cube 0. 0. 0. 55 .
+end structure
+filetype pdb
+structure Zn.pdb
+number 580
+inside cube 0. 0. 0. 55 .
+end structure
+</code></pre>
+
+<p>Copy all pdb file in one folder and run the script with the command under this folder:</p>
+<pre class="prettyprint"><code class="language-bash hljs ">$AMBERHOME/bin/packmol < input.inp
+</code></pre>
+
+<p>Then a file ‘ZnCl-meoh-1-3.pdb’ is created as follows:</p>
+
+<center><a href="files/ZnCl-meoh-1-3.pdb">ZnCl-meoh-1-3.pdb</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">HEADER
+TITLE     Built with Packmol through Packmol Memgen
+REMARK   Packmol generated pdb file, Packmol Memgen estimated parameters
+REMARK   Home-Page: http://www.ime.unicamp.br/~martinez/packmol
+REMARK
+ATOM      1  C1   me A   1      22.204  12.282  10.963                        C
+ATOM      2  H2   me A   1      21.169  11.970  10.842                        H
+ATOM      3  H3   me A   1      22.437  12.996  10.186                        H
+ATOM      4  H4   me A   1      22.846  11.414  10.836                        H
+ATOM      5  O5   me A   1      22.420  12.920  12.190                        O
+ATOM      6  H6   me A   1      22.223  12.320  12.895                        H
+ATOM      7  C1   me A   2       7.047  39.400   5.560                        C
+ATOM      8  H2   me A   2       6.303  39.132   6.306                        H
+ATOM      9  H3   me A   2       6.836  40.402   5.212                        H
+……
+……
+</code></pre>
+
+<h2 id="22-creating-mol2-files-for-all-residues">2.2 Creating Mol2 files for all residues</h2>
+
+<p>In AMBER,  residue library files is needed to identify different molecules or units, and charge information is included in this file. Here we use mol2 file instead.</p>
+<p>First, we use Antechamber program (included in AMBER) to create mol2 file. During this step, atomic charge of methanol will be determined by bcc method.</p>
+
+<pre class="prettyprint"><code class="language-bash hljs ">$AMBERHOME/bin/antechamber -i me1.pdb -fi pdb -o me.mol2 -fo mol2 -c bcc -pf y
+$AMBERHOME/bin/antechamber -i Zn.pdb -fi pdb -o Zn.mol2 -fo mol2 -c bcc -pf y
+$AMBERHOME/bin/antechamber -i Cl.pdb -fi pdb -o Cl.mol2 -fo mol2 -c bcc -pf y
+</code></pre>
+
+<center><a href="files/me.mol2">me.mol2</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">@<TRIPOS>MOLECULE
+me
+    6     5     1     0     0
+SMALL
+No Charge or Current Charge
+
+
+@<TRIPOS>ATOM
+      1 C1           0.6550    -0.0200     0.0000 c3         1 me        0.26724798
+      2 H2           1.0120    -0.5440    -0.8830 h1         1 me       -0.00401241
+      3 H3           1.0770     0.9760    -0.0010 h1         1 me       -0.00401241
+      4 H4           1.0120    -0.5430     0.8840 h1         1 me       -0.00401241
+      5 O5          -0.7370     0.1210     0.0000 oh         1 me       -0.68007123
+      6 H6          -1.1400    -0.7360     0.0000 ho         1 me        0.42486049
+@<TRIPOS>BOND
+     1     1     2 1   
+     2     1     3 1   
+     3     1     4 1   
+     4     1     5 1   
+     5     5     6 1   
+@<TRIPOS>SUBSTRUCTURE
+     1 me          1 TEMP              0 ****  ****    0 ROOT
+
+</code></pre>
+
+<p>For zinc ion and chloridion, we need to modify the atomic charge with a charge scale factor reported in literature. This factor is 0.5 for 1:3 molar ratio mixture and 0.8 for 1:6 molar ratio mixture.</p>
+<center><a href="files/Zn.mol2">Zn.mol2</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">@<TRIPOS>MOLECULE
+Zn
+    1     0     1     0     0
+SMALL
+No Charge or Current Charge
+
+
+@<TRIPOS>ATOM
+      1 Zn           0.000      0.000      0.000  zn         1 Zn       1.000000
+@<TRIPOS>BOND 
+@<TRIPOS>SUBSTRUCTURE
+     1 Zn          1 TEMP              0 ****  ****    0 ROOT
+</code></pre>
+
+<center><a href="files/Cl.mol2">Cl.mol2</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">@<TRIPOS>MOLECULE
+Cl
+    1     0     1     0     0
+SMALL
+No Charge or Current Charge
+
+
+@<TRIPOS>ATOM
+      1 Cl           0.0000     0.0000     0.0000 cl         1 Cl       -0.500000
+@<TRIPOS>BOND
+@<TRIPOS>SUBSTRUCTURE
+     1 Cl          1 TEMP              0 ****  ****    0 ROOT
+
+</code></pre>
+
+<h2 id="23-creating-parameter-modification-file-for-zinc-ion">2.3 Creating parameter modification file for zinc ion.</h2>
+
+<p>We are using GAFF2 force field for the system. Since there is no non-bond parameter for zinc ion in GAFF2 force field, we need to prepare its parameter modification file. Parmchk2 program in amber can help us.</p>
+<pre class="prettyprint"><code class="language-bash hljs ">$AMBERHOME/bin/parmchk2 -i Zn.mol2 -f mol2 -o frcmod.Zn
+</code></pre>
+
+<p>Atom mass and Lennard-Jones coefficient should be changed manually to reference value.</p>
+
+<center><a href="files/frcmod.Zn">frcmod.Zn</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">Remark line goes here
+MASS
+zn   65.4
+
+BOND
+
+ANGLE
+
+DIHE
+
+IMPROPER
+
+NONBON
+zn   1.570   0.18300000
+</code></pre>
+
+<h2 id="24-creating-the-topology-and-coordinate-files">2.4 Creating the topology and coordinate files.</h2>
+<p>After the steps before, we are able to create the topology and coordinate files for the system.</p>
+
+<p>Here, a tleap script named ‘leaprc’ is written as follows:</p>
+
+<center><a href="files/leaprc">leaprc</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">gaff = loadamberparams gaff2.dat
+loadamberparams frcmod.Zn
+me = loadmol2 me.mol2
+Zn = loadmol2 Zn.mol2
+Cl = loadmol2 Cl.mol2
+meoh13-0.5Abox = loadPdb meoh1.pdb
+setbox meoh13-0.5Abox centers
+saveamberparm meoh13-0.5Abox meoh13-0.5A.prmtop meoh13-0.5A.inpcrd
+</code></pre>
+
+<p>Then the prmtop and inpcrd files are generated, Then the prmtop and inpcrd files are generated. Take a look at the ‘meoh13-0.5A.inpcrd’ file:</p>
+
+<center><a href="files/meoh13-0.5A.inpcrd">meoh13-0.5A.inpcrd</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">gaff = loadamberparams gaff2.dat
+default_name
+ 12180
+  22.4555222  12.4976588  11.0300630  21.4205222  12.1856588  10.9090630
+  22.6885222  13.2116588  10.2530630  23.0975222  11.6296588  10.9030630
+  22.6715222  13.1356588  12.2570630  22.4745222  12.5356588  12.9620630
+   7.2985222  39.6156588   5.6270630   6.5545222  39.3476588   6.3730630
+   7.0875222  40.6176588   5.2790630   7.2095222  38.9336588   4.7850630
+   8.5935222  39.6266588   6.1580630   8.8115222  38.7616588   6.4740630
+   ……
+   ……
+   3.7415222  49.1326588   9.8490630  28.4675222  54.0026588  21.4180630
+   4.2265222  44.4286588  32.5060630   9.3855222  47.0056588  54.6960630
+  18.7175222  52.8896588  51.2310630  28.4475222  14.1086588  19.0740630
+  55.0790000  55.1250000  55.1280000  90.0000000  90.0000000  90.0000000
+</code></pre>
+
+<p>The first line gives the name of this inpcrd file, which was not defined and is default here. The second line specifies the number of atoms in this system, and the following data are the coordinates of each atom. The last line defines the cubic box with a size of 55.0 Å *55.0 Å *55.0 Å , which remains to be further optimized in the following sections.</p>
+
+<blockquote>Note: the generated box size will be probably not exactly 55.0 Å, but should be close.</blockquote>
+
+<p>The meoh13-0.5A.prmtop’ file gives the parameter and topology information of the system, such as atomic number, atom type, charges, bonding and non-bonded interactions, etc. For more details of the prmtop file, please visit http://ambermd.org/formats.html#topology.</p>
+
+<center><a href="files/meoh13-0.5A.prmtop">meoh13-0.5A.prmtop</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">gaff = loadamberparams gaff2.dat
+%VERSION  VERSION_STAMP = V0001.000  DATE = 04/26/22  19:18:58                  
+%FLAG TITLE                                                                     
+%FORMAT(20a4)                                                                   
+default_name                                                                    
+%FLAG POINTERS                                                                  
+%FORMAT(10I8)                                                                   
+   12180       6    6960    1740   12180       0    5220       0       0       0
+   29580    3480    1740       0       0       3       3       1       6       0
+       0       0       0       0       0       0       0       1       6       0
+       0
+%FLAG ATOM_NAME                                                                 
+%FORMAT(20a4)                                                                   
+C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  
+H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  
+O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  C1  H2  H3  H4  O5  H6  
+……
+……
+</code></pre>
+
+<h1 id="3-classical-dynamics">3. Classical Dynamics</h1>
+
+<p>In this section, we use classical molecular dynamics to calculate the thermodynamic properties of zinc chloride methanol mixtures. The simulations are performed in a cubic box with the periodic boundary conditions. We run an NPT simulation first to obtain the density for liquid water under a series of temperatures between 100 K with 340 K and at the pressure of 1 atm, and then an NVT simulation to obtain canonical equilibrium properties. After equilibrating the system, we sample the coordinates and velocities from the NVT ensemble, which will be used as the initial conditions for classical trajectories in the NVE ensemble.</p>
+
+<blockquote>
+  <p>NVE: constant number (N), volume (V), and energy (E); the sum of kinetic (KE) and potential energy (PE) is conserved, temperature (T) and pressure (P) are unregulated.</p>
+  
+  <p>NVT: constant number (N), volume (V), and temperature (T); T is regulated via a thermostat; P is unregulated.</p>
+  
+  <p>NPT: constant number (N), temperature (T) and pressure (P); T is regulated via a thermostat and P is regulated via a bariostat; V is unregulated.</p>
+</blockquote>
+
+<p>The 1:3 molar ratio zinc chloride methanol mixture are showed here as an example, other ratios of mixtures are similar to this.</p>
+
+<h2 id="31-equilibrating-the-system-using-classical-dynamics-npt">3.1 Equilibrating the system using classical dynamics (NPT)</h2>
+
+<p>The ‘min.rst’ file obtained from minimization is used as the <strong>inpcrd</strong> file, together with the <strong>prmtop</strong> file ‘meoh13.prmtop’ to run an NPT simulation. In this stage, the NPT simulation is carried out for to obtain convergent densities under different temperatures .</p>
+
+<p>First, different initial conditions are prepared under room temperature 298.15 K. The inputfile used for generating initial conditions is</p>
+
+<center><a href="codes/npt0.in">npt0.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">NPT simulation of 1:3 molar ratio zinc chloride methanol 
+&amp;cntrl 
+imin = 0, 
+irest = 0, ntx = 1, 
+ntb = 2, cut = 20.0, 
+ntp = 1,taup = 1.0, pres0 = 1.013, 
+tempi = 298.15, temp0 = 298.15, 
+ntt = 3, gamma_ln = 5.0, ig = -1, 
+nstlim = 200000, dt = 0.001, 
+ntpr = 100, ntwx = 0, ntwr = 100 
+/ 
+&amp;ewald 
+skinnb = 2.0 
+/ 
+</code></pre>
+<!--
+<div class="col-md-6-inline"><center><a href="files/npt2.in">npt2.in</a></center>
+NPT simulation of liquid water 
+&amp;cntrl 
+imin = 0, 
+irest = 1, ntx = 5, 
+ntb = 2, cut = 7.0, 
+ntp = 1,taup = 4.0, pres0 = 1.013, 
+tempi = 298.15, temp0 = 298.15, 
+ntt = 3, gamma_ln = 5.0, ig = -1, 
+nstlim = 400000, dt = 0.0005, 
+ntpr = 10, ntwx = 10, ntwr = 10 
+/ 
+&amp;ewald 
+skinnb = 2.0 
+ / 
+</code></pre></div>
+-->
+
+<table>
+<thead>
+<tr>
+  <th>Settings</th>
+  <th>Summary</th>
+</tr>
+</thead>
+<tbody><tr>
+  <td>imin = 0</td>
+  <td>Do not do minimization</td>
+</tr>
+<tr>
+  <td>irest = 0</td>
+  <td>Do not restart the simulation</td>
+</tr>
+<tr>
+  <td>ntx = 1</td>
+  <td>Only read coordinates from input</td>
+</tr>
+<tr>
+  <td>irest = 1</td>
+  <td>Restart the simulation</td>
+</tr>
+<tr>
+  <td>ntx = 5</td>
+  <td>Read both the coordinates and velocities from input</td>
+</tr>
+<tr>
+  <td>ntb = 2</td>
+  <td>Constant pressure periodic boundary conditions are used</td>
+</tr>
+<tr>
+  <td>cut = 20.0</td>
+  <td>Non-bonded cutoff distance in Angstroms</td>
+</tr>
+<tr>
+  <td>ntp = 1</td>
+  <td>With isotropic position scaling</td>
+</tr>
+<tr>
+  <td>taup = 4.0</td>
+  <td>Pressure relaxation time (in ps), recommended value is between 1.0 and 5.0, default is 1.0.</td>
+</tr>
+<tr>
+  <td>pres0 = 1.013</td>
+  <td>Reference pressure (in bar) at which the system is to be kept</td>
+</tr>
+<tr>
+  <td>tempi = 298.15</td>
+  <td>Initial temperature (in K)</td>
+</tr>
+<tr>
+  <td>temp0 = 298.15</td>
+  <td>Reference temperature (in K) at which the system is to be kept</td>
+</tr>
+<tr>
+  <td>ntt = 3</td>
+  <td>Langevin thermostat is used</td>
+</tr>
+<tr>
+  <td>gamma_ln = 5.0</td>
+  <td>Collision frequency (in ps<sup>-1</sup>) for Langevin dynamics</td>
+</tr>
+<tr>
+  <td>ig = -1</td>
+  <td>Random seed is initialized with current date and time.</td>
+</tr>
+<tr>
+  <td>nstlim = 200000</td>
+  <td>Number of steps to be performed</td>
+</tr>
+<tr>
+  <td>dt = 0.001</td>
+  <td>The size of time step (in ps)</td>
+</tr>
+<tr>
+  <td>ntpr = 10</td>
+  <td>Energy information will be written to <strong>mdout</strong> and <strong>mdinfo</strong> every 10 steps</td>
+</tr>
+<tr>
+  <td>ntwx = 10</td>
+  <td>The coordinates will be written to the <strong>mdcrd</strong> file every 10 steps</td>
+</tr>
+<tr>
+  <td>ntwr = 10</td>
+  <td>The <strong>restrt</strong> file will be written every 10 steps during dynamics</td>
+</tr>
+<tr>
+  <td>skinnb=2.0</td>
+  <td>Width of the nonbonded “skin” (in Å), default is 2.0 Å. The direct sum nonbonded list is extended to <code>cut</code>+<code>skinnb</code></td>
+</tr>
+</tbody></table>
+
+<pre class="prettyprint"><code class="language-bash hljs ">pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o eq.out -p meoh13.prmtop -c min.rst -r eq.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 1.out -p meoh13.prmtop -c eq.rst -r 1.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 2.out -p meoh13.prmtop -c 1.rst -r 2.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 3.out -p meoh13.prmtop -c 2.rst -r 3.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 4.out -p meoh13.prmtop -c 3.rst -r 4.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 5.out -p meoh13.prmtop -c 4.rst -r 5.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 6.out -p meoh13.prmtop -c 5.rst -r 6.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 7.out -p meoh13.prmtop -c 6.rst -r 7.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 8.out -p meoh13.prmtop -c 7.rst -r 8.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 9.out -p meoh13.prmtop -c 8.rst -r 9.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o 10.out -p meoh13.prmtop -c 9.rst -r 10.rst</code></pre>
+
+<p>The only difference of the simulation command is that <strong>pmemd.cuda_SPFP</strong> is used instead of <strong>sander</strong> and <strong>pmemd</strong>. If you are running this on a GPU cluster, be sure to load <strong>cuda</strong> and <strong>netcdf</strong> libraries as well as sourcing <strong>${AMBERHOME}/amber.sh</strong>. The simulation flag <strong>-AllowSmallBox</strong> is used due to the PME cutoff is larger than one third of the box length. This flag is not fully tested in AMBER, one should increase the system size to use larger cutoff.</p>
+
+<p><strong>nvidia-smi</strong> can be used to check the work running on GPUs. By setting the <strong>CUDA_VISIBLE_DEVICES</strong> environment variable, one can assgin which GPU to process on a multi-GPU platform.</p>
+
+<p>After setting the initial conditions, simulations under different temperatures are ready to run. <a href="codes/input.sh">input.sh</a> can be used to generate folders and inputfiles used for different temperatures. According to the DSC experiments, we need to simulate the mixtures from 100 K to 340 K.</p>
+
+<p>As an example for 298.15 K, <a href="codes/npt1.in">npt1.in</a> and <a href="codes/npt2.in">npt2.in</a> are generated by input.sh, they are used for equilibrium ans sampling in the NPT simulations.</p>
+
+<pre class="prettyprint"><code class="language-bash hjls">pmemd.cuda_SPFP -AllowSmallBox -O -i npt1.in -o eq.out -p meoh13.prmtop -c ../configs/1.rst -r eq.rst
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt2.in -o 1.out -p meoh13.prmtop -c eq.rst -r 1.rst -x 1.mdcrd
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt2.in -o 2.out -p meoh13.prmtop -c 1.rst -r 1.rst -x 2.mdcrd
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt2.in -o 3.out -p meoh13.prmtop -c 2.rst -r 1.rst -x 3.mdcrd
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt2.in -o 4.out -p meoh13.prmtop -c 3.rst -r 1.rst -x 4.mdcrd
+pmemd.cuda_SPFP -AllowSmallBox -O -i npt2.in -o 5.out -p meoh13.prmtop -c 4.rst -r 1.rst -x 5.mdcrd
+</code></pre>
+
+<p>npt1.in is used for 200ps equilibrium , npt2.in is used for 10ns sampling. The above script run with npt2.in 5 times to generate a 50 ns simulation in total. Usually the last 30 ns are used for analysis.</p>
+
+<p>As indicated by the DSC experiment, the phase transition behavior of 1:3 and 1:6 molar ratio zinc chloride methanol mixture should be very different. The NPT simulation can produce the relations between densities and temperatures, they may look like</p>
+
+<center><img src="figs/dens0-merge.png" alt="mixture-dens"></center>
+<center>Fig1. Density to temperature in zinc chloride methanol mixture</center>
+
+<p>Despite the densities, constant volume heat capacities can also be evaluated by the NPT trajectories. <span, class = "math display">\[C_P = k*\beta^2(\langle H^2 \rangle - \langle H \rangle^2)\]</span> The capacity is proportional to the variance of enthalpy. <a href="codes/gathercp.sh">gathercp.sh</a> along with <a href="calcp.py">calcp.py</a> can be used to evaluate the enthalpy variance, so that we can show the heat capacity difference depend on temperatures.</p>
+
+<center><img src="figs/Cp1.png" alt="mixture-cp"></center>
+<center>Fig2. Heat capacity to temperature in zinc chloride methanol mixture</center>
+
+<h2 id="32-equilibrating-the-system-using-classical-dynamics-nvt">3.2 Equilibrating the system using classical dynamics (NVT)</h2>
+
+<p>In the previous stage, we have obtained convergent densities of different molar ratio zinc chloride methanol under different temperatures. Here we are ready to do NVT simulations for more thermodynamical properties. For the NVT simulations, middle-thermostat scheme is a more efficient technique, which has already be implemented in AMBER GPU engine. The following input files show how to do NVT simulations with and without middle-thermostat scheme:  </p>
+
+<center><a href="codes/nvt4.in">nvtmid.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">NVT simulation of 1:3 molar ratio zinc chloride methanol with middle-thermostat
+&amp;cntrl 
+imin = 0, 
+irest = 1, ntx = 5, 
+ntb = 1, cut = 20.0, 
+tempi = 298.15, temp0 = 298.15, 
+ischeme = 1, ithermostat = 1, therm_par = 5.0,
+ig = -1,
+nstlim = 100000000, dt = 0.0001,
+ntpr = 100, ntwx = 100000, ntwr = 100 
+/
+&amp;ewald 
+skinnb = 2.0 
+/ 
+</code></pre>
+
+<center><a href="codes/nvt3.in">nvtend.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">NVT simulation of 1:3 molar ratio zinc chloride methanol without middle-thermostat
+&amp;cntrl 
+imin = 0, 
+irest = 1, ntx = 5, 
+ntb = 1, cut = 20.0, 
+tempi = 298.15, temp0 = 298.15, 
+ntt = 3, gamma_ln = 5.0,
+ig = -1,
+nstlim = 100000000, dt = 0.0001,
+ntpr = 100, ntwx = 100000, ntwr = 100 
+/
+&amp;ewald 
+skinnb = 2.0 
+/ 
+</code></pre>
+
+<p>The NVT simulations with or without middle-thermostat scheme can be compared using these input files. After equilibrating the NPT configurations under NVT for about 5 ns, 10 ns NVT simulations of different molar ratio zinc chloride methanol are proposed using different timesteps from 0.05 fs to 2.0 fs.</p>
+
+<center><img src="figs/meoh13-midpotkin.png" alt="meoh13-midpotkin"></center>
+<center>Fig3. Potential and kinetic energy of 1:3 molar ratio zinc chloride methanol.</center>
+
+<center><img src="figs/meoh16-midpotkin.png" alt="meoh16-midpotkin"></center>
+<center>Fig4. Potential and kinetic energy of 1:6 molar ratio zinc chloride methanol.</center>
+
+<p>The above figures show the differences between middle-thermostat and traditional end-thermostat schemes in NVT simulations of zinc chloride methanol mixture. Middle-thermostat on AMBER GPU simulations also shows great improvement on thermodynamical properties of configurations.</p>
+
+<h2 id="33-surface-tension">3.3 Surface tension and vapour pressure calculation using NVT simulations</h2>
+
+<p>Surface tension and vapour pressure are also important properties for zinc chloride methanol mixtures. Compared to pure methanol solvent, zinc chloride methanol solvents have a higher surface tension and a lower vpour pressure, which make it a green chemistry solvent. Direct NVT simulation of vapour-liquid co-existence system make it possible to calculate surface tension and vapour pressure. To simulate vapour-liquid co-existence system, we need to construct a slab simulation box based on the equilibrium configurations we get in former NVT simulations.</p>
+
+<p>In a slab simulation box, we extend the box parameter along Z axis to 250 Angstrom while keeping the XY axis parameters unchanged. By doing this, the simulation box have a vacum in Z direction so that we can simulate the vapour-liquid co-existence system directly. The following python script can be used to do this construction:</p>
+
+<center><a href="codes/convert.py">convert.py</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">from parmed import amber
+import numpy as np
+
+ntot = 12180
+
+amb_prm = amber.AmberParm('prmtop')
+amb_prm.box[2] = 250.0
+amb_prm.save('prmtop',format='amber')
+amb_inpcrd = amber.Rst7('inpcrd')
+for i in range(ntot):
+	amb_inpcrd.coordinates[0][i][2] += 100.0
+amb_inpcrd.box[2] = 250.0
+amb_inpcrd.write('slab.rst')
+</code></pre>
+
+<p>This python script uses the <strong>parmed</strong> package to modify the prmtop and inpcrd files. <strong>ntot</strong> is the total atom numbers in you simulation box, for 1:3 mixture it is 12180, for 1:6 mixture it is 11310. <strong>promtop</strong> is the topology file, <strong>inpcrd</strong> is the coordinate file or restart file after NVT simulations. This script modifies the Z axis paramter to 250 Angstrom and move the solvent layer to the center of the simulation box. After the convert, the simulation box may look like this:</p>
+
+<center><img src="figs/init.png" alt="slab-init"></center>
+<center>Fig5. A slab simulation box.</center>
+
+<p>If your simulation save unwrapped configurations, you need to wrap the simulation box before doing the slab box convert. This can be done by using VMD. After loading the prmtop and your configuration files in VMD, using <strong>pbc box</strong> and <strong>pbc wrap --compound res</strong> command in the terminal window to wrap the moleculars back into the box by residues. Then save this configuration as the new wrapped configuration and use it to construct the slab box.</p>
+
+<p>Calculating the surface tension and vapour pressure needs the pressure tenssor data which is usually given in NPT simulations in AMBER. Setting the <strong>taup</strong> paramter in input files to a large number (like 9999) can make the volume change in a significant large time scale, which can be considered a NVT simulation. By doing so, you can get the pressure tensor data during NVT simulations. If you are able to modify the AMBER source code, it is highly recommended that you modify the <strong>${AMBERSRC}/pmemd/src/runmd.f90</strong> to make the volume unchanged and rebuild the AMBER package to do real NVT simulations for surface tension calculations.</p>
+
+<p>The following input files are for slab box NVT simulations:</p>
+
+<center><a href="codes/slab.in">slabmid.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">NVT simulation of 1:3 molar ratio zinc chloride methanol with middle-thermostat and with slab box
+&amp;cntrl 
+imin = 0, 
+irest = 1, ntx = 5, 
+ntb = 2, cut = 20.0, 
+ntp = 1,taup = 9999, pres0 = 1.013, 
+tempi = 298.15, temp0 = 298.15, 
+ischeme = 1, ithermostat = 1, therm_par = 5.0,
+ig = -1,
+nstlim = 100000000, dt = 0.0001,
+ntpr = 100, ntwx = 100000, ntwr = 100, ntwe = 100000
+/
+&amp;ewald 
+skinnb = 2.0 
+/ 
+</code></pre>
+
+<center><a href="codes/slabend.in">slabend.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">NVT simulation of 1:3 molar ratio zinc chloride methanol without middle-thermostat and with slab box
+&amp;cntrl 
+imin = 0, 
+irest = 1, ntx = 5, 
+ntb = 2, cut = 20.0, 
+ntp = 1,taup = 9999, pres0 = 1.013, 
+tempi = 298.15, temp0 = 298.15, 
+ntt = 3, gamma_ln = 5.0,
+ig = -1,
+nstlim = 100000000, dt = 0.0001,
+ntpr = 100, ntwx = 100000, ntwr = 100, ntwe = 100000
+/
+&amp;ewald 
+skinnb = 2.0 
+/ 
+</code></pre>
+
+<p>The <strong>ntwe</strong> parameter in input files control the output of <strong>mden</strong> file, which stores the energies and temperatures. The pressure tensor datas are also stored in this file.</p>
+
+<p>The following command is used to run the NVT simulations for slab box and save the <strong>mden</strong> file to <strong>slabmid.mden</strong></p>
+<pre class="prettyprint"><code class="language-bash hjls">pmemd.cuda_SPFP -AllowSmallBox -O -i slabmid.in -o slabmid.out -e slabmid.mden -p slabmid.prmtop -c slabmid.inpcrd -r slabmid.rst -x slabmid.mdcrd
+</code></pre>
+
+<p>A typical <strong>mden</strong> file has a header followed by data saved by every <strong>ntwe</strong> simulation step, the header looks like this:</p>
+<pre class="prettyprint"><code class="language-bash hjls">L0  Nsteps           time(ps)         Etot             EKinetic        
+L1  Temp             T_solute         T_solv           Pres_scal_solu  
+L2  Pres_scal_solv   BoxX             BoxY             BoxZ            
+L3  volume           pres_X           pres_Y           pres_Z          
+L4  Pressure         EKCoM_x          EKCoM_y          EKCoM_z         
+L5  EKComTot         VIRIAL_x         VIRIAL_y         VIRIAL_z        
+L6  VIRIAL_tot       E_pot            E_vdw            E_el            
+L7  E_hbon           E_bon            E_angle          E_dih           
+L8  E_14vdw          E_14el           E_const          E_pol           
+L9  AV_permMoment    AV_indMoment     AV_totMoment     Density          dV/dlambda      
+</code></pre>
+
+<p>What we need are <strong>pres_X, pres_Y, pres_Z</strong>. The surface tension can be calculated by </p>
+<p><span, class = "math display">\[ \gamma = \frac{L_z}{2}(p_{zz}-\frac{p_{xx}+p_{yy}}{2}) \]</span></p>
+<p>where L_z is the box length in Z axis, which is set to be 250 Angstrom. p_xx, p_yy and p_zz are pres_X, pres_Y and pres_Z in <strong>mden</strong> files. Meanwhile, the pres_Z can also be considered as an approximation of vapour pressure.</p>
+<p>The shell script <a href="codes/gatherst.sh">gatherst.sh</a> along with the python script <a href="codes/l3.py">l3.py</a> can be used to calculate the surface tension under different timesteps.</p>
+
+<center><img src="figs/meoh13-st.png" alt="meoh13-st"></center>
+<center>Fig6. Surface tension of 1:3 molar ratio zinc chloride methanol mixture.</center>
+
+<center><img src="figs/meoh16-st.png" alt="meoh16-st"></center>
+<center>Fig7. Surface tension of 1:6 molar ratio zinc chloride methanol mixture.</center>
+
+<center><img src="figs/meoh-st.png" alt="meoh-st"></center>
+<center>Fig8. Surface tension of pure methanol.</center>
+
+<p>Fig6, Fig7 and Fig8 show the surface tension result of 1:3 mixture, 1:6 mixture and pure methanol. The results show that middle-thermostat scheme and end-thermostat scheme don't have significant difference on surface tension calculation.</p>
+
+<p>For more informations about surface tension and vapour pressure simulation</p>
+
+<ul>
+<li><a href="https://doi.org/10.1080/00268978700101491">Panagiotopoulos, A. Z. Direct determination of phase coexistence properties of fluids by Monte Carlo simulation in a new ensemble. Mol. Phys. 1987, 61(4): 813–826.</a></li>
+<li><a href="https://doi.org/10.1063/1.465023">Kofke, D. A. Direct evaluation of phase coexistence by molecular simulation via integration along the saturation line. J. Chem. Phys. 1993, 98(5): 4149–4162.</a></li>
+<li><a href="https://doi.org/10.1063/1.2715577">Vega, C. and Miguel, E. de. Surface tension of the most popular models of water by using the test-area simulation method. J. Chem. Phys. 2007, 126(15): 154707.</a></li>
+</ul>
+
+
+<h2 id="34-hbond-analysis">3.4 Analysis the hydrogen bond network in the mixture</h2>
+
+<p>As we now have numbers of NPT trajectories of mixtures under different temperatures, we are able to analyse the hydrogen bond network in the solvent. In the mixture, there are original O-H...O hbond in methanols and new O-H...Cl hbond between methanols and chlorides. What we want to do is to figure out how the hbond affects the IR.</p>
+
+<p><strong>cpptraj</strong> is a useful tool for finding out all the hydrogen bonds in trajectories. For O-H...O hbond, a script for finding out all the hbonds in a snapshot reads</p>
+
+<center><a href="hbond/hbb.in">hbb.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">trajin mdcrd 1000 1000
+
+hbond HB dist 3.5 donormask :MET@O acceptormask :MET@O out bb.dat series uuseries solutehb.agr image\
+avgout bhavg.dat printatomnum
+
+run
+</code></pre>
+<p>for O-H...Cl hbond, the script reads</p>
+
+<center><a href="hbond/haa.in">haa.in</a></center>
+<pre class="prettyprint"><code class=" hljs ruleslanguage">trajin mdcrd 1000 1000
+
+hbond HB dist 4 donormask :MET@O acceptormask :CL@CL out aa.dat series uuseries solutehb.ocl image \
+avgout ahbavg.dat printatomnum
+
+run
+
+</code></pre>
+
+<p>As can be seen from the scripts, the O-H...O hbond is defined by a 3.5 Angstrom O-H...O distance cutoff while the O-H...Cl hbond is defined by a 4.0 Angstrom O-H...Cl distance cutoff. The O-H...X angle cutoff is the default cutoff 135 degree. The mask of donor and acceptor should be identical to your prmtop (may be slightly differenct in GAFF2 and OPLS-aa force-fields). </p>
+
+<p>The following command can be used to run the above scripts by cpptraj. The <strong>solutehb.agr</strong> and <strong>solutehb.ocl</strong> store the details of hbonds.</p>
+<pre class="prettyprint"><code class="language-bash hjls">cpptraj -p prmtop -i haa.in
+cpptraj -p prmtop -i hbb.in
+</code></pre>
+
+<p>To analyse the hbond network, we need the knowledge of graph theory. <a href="hbond/read.cpp">read.cpp</a> gives a analysis framework by using union-find set (dfs and bfs algorithms can also be used to analyse hbond network). <a href="hbond/unionfindcl.h">unionfindcl.h</a> gives the implementation of union-find set.</p>
+<p>The analysis program can be compiled by</p>
+<pre class="prettyprint"><code class="language-bash hjls">g++ -std=c++11 unionfindcl.h read.cpp
+</code></pre>
+<p>and be executed by</p>
+<pre class="prettyprint"><code class="language-bash hjls">./a.out solutehb.agr solutehb.ocl 1000
+</code></pre>
+
+<p>The analysis program gives out several files describing the hbond network:</p>
+<ul>
+<li>
+<strong>XXX.cluster</strong> describes the hbond network formed by methanols
+<ul>
+<li>the first column is the molecule index</li>
+<li>the second column is a cluster label(those molecules in the same hbond network would have the same label)</li>
+<li>the third column is the size of the hbond network</li>
+</ul>
+</li>
+<li>
+<strong>XXX.totcluster</strong> describes the total hbond network formed by methanols and chlorides
+<ul>
+<li>the first column is the residue index, first 1740 rows are methanols</li>
+<li>the second column is a cluster label(those molecules in the same hbond network would have the same label)</li>
+<li>the third column is the number of methanols in this network</li>
+<li>the fourth column is the number of chlorides in this network</li>
+<li>the fifth column is the total number of residues in this network</li>
+</ul>
+</li>
+<li>
+<strong>XXX.puremeohcnt</strong> counts the pure methanol clusters regardless of chlorides
+<ul>
+<li>the first column is the size of cluster</li>
+<li>the second column is number of clusters</li>
+</ul>
+</li>
+<li>
+<strong>XXX.meohclcnt</strong> counts the clusters in the total hbond network
+<ul>
+<li>the first column is the size of cluster</li>
+<li>the second column counts the methanols in a network</li>
+<li>the third column counts the chlorides in a network</li>
+<li>the fourth column counts the total number of residues in a network</li>
+</ul>
+for example, 2 342 4 318 means only 342/2 clusters have only two methanols, only 4/2 clusters have only two chlorides, only 318/2 clusters have only two residues.
+</li>
+<li>
+<strong>XXX.ohmap</strong> describes the direct O-H...O hbonds
+<ul>
+<li>the first column is the index of donor, following are acceptors</li>
+</ul>
+</li>
+<li>
+<strong>XXX.clmap</strong> describes the direct O-H...Cl hbonds
+<ul>
+<li>the first column is the index of acceptor, following are donors</li>
+</ul>
+</li>
+<li>
+<strong>XXX.cltooh</strong> is the reverse version of <strong>XXX.clmap</strong>
+<ul>
+<li>the first column is the index of donor, following are acceptors</li>
+</ul>
+</li>
+</ul>
+
+<p>To obtain the statistical average of hbond properties, we need to analyse different configurations along the trajectories. <a href="hbond/all.sh">all.sh</a> along with <a href="hbond/count.sh">count.sh</a> and <a href="hbond/count.py">count.py</a> can be combined togather to do this job.</p>
+<p><a href="all2.sh">all2.sh</a> along with <a href="count2.py">count2.py</a> and <a href="getdis.py">getdis.py</a> can be used to calculate the distribution of different size of clusters.</p>
+
+<center><img src="figs/hbondcnt.png" alt="hbondcnt"></center>
+<center>Fig9. Number of hbonds in the mixture.</center>
+
+<center><img src="figs/meoh-hbond.png" alt="meoh-hbond"></center>
+<center>Fig10. Hbond cluster distribution in pure methnaol.</center>
+
+<center><img src="figs/nocl-hbond.png" alt="nocl-hbond"></center>
+<center>Fig11. Hbond cluster (without O-H...Cl hbond) distribution in zinc chloride methnaol mixture.</center>
+
+<center><img src="figs/cl-hbond.png" alt="cl-hbond"></center>
+<center>Fig12. Hbond cluster (with O-H...Cl hbond) distribution in zinc chloride methnaol mixture.</center>
+
+<p>Fig9, Fig10, Fig11, Fig12 show the hbond distributions in zinc chloride methanol mixtures, accually there are significant differences between different molar ratio mixtures, but the direct relationship between the hbond distribution and the IR spectroscopy should be careful considered.</p>
+
+</div>
+</body></html>
